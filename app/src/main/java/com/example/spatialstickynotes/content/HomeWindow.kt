@@ -78,7 +78,9 @@ fun HomeWindow(modifier: Modifier = Modifier) {
         navigator.openWindowContainer(Windows.NOTE, id, Windows.noteBundle(id, draft = true))
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    // Near-white scrim over the OS material glass so the panel reads light regardless of what is
+    // behind it (the bare glass turned grey in front of dark furniture).
+    Column(modifier = modifier.fillMaxSize().background(Tokens.Canvas.copy(alpha = 0.85f))) {
         TitleBar(
             title = {
                 Box(modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Tokens.NoteFill), contentAlignment = Alignment.Center) {
