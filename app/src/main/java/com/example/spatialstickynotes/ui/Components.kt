@@ -5,11 +5,13 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,7 +41,6 @@ import com.pico.spatial.ui.design.PicoTheme
 import com.pico.spatial.ui.design.Text
 import com.pico.spatial.ui.design.windows.AlertDialog
 import androidx.compose.foundation.gestures.Orientation
-import com.pico.spatial.ui.foundation.hover.spatialHoverEffect
 
 /** Colour role of an icon button (Figma Button/Secondary · Button/Danger · Button/Primary). */
 enum class Role { Secondary, Danger, Accent }
@@ -103,24 +104,26 @@ fun StickyCard(
     selected: Boolean = false,
     onClick: (() -> Unit)? = null,
     width: Dp = Tokens.NoteCardWidth,
-    height: Dp = Tokens.NoteCardHeight,
+    minHeight: Dp = Tokens.NoteCardMinHeight,
+    maxHeight: Dp = Tokens.NoteCardMaxHeight,
 ) {
     val scroll = rememberScrollState()
     val shape = RoundedCornerShape(Tokens.NoteCornerRadius)
+    // Height follows the text between one line and the maximum; longer notes scroll inside the card.
     var m = modifier
         .width(width)
-        .height(height)
+        .heightIn(min = minHeight, max = maxHeight)
         .clip(shape)
         .background(Tokens.NoteFill)
         .border(if (selected) 2.dp else 1.dp, if (selected) Tokens.Accent else Tokens.White.copy(alpha = 0.9f), shape)
-    if (onClick != null) m = m.spatialHoverEffect().clickable(onClick = onClick)
+    // Plain clickable without indication / hover effect: with PicoTheme's default indication (and with
+    // spatialHoverEffect) the tap never reached this Box on PICO OS 6.1, so tap-to-edit silently died.
+    val interaction = remember { MutableInteractionSource() }
+    if (onClick != null) m = m.clickable(interactionSource = interaction, indication = null, onClick = onClick)
     Box(modifier = m.padding(horizontal = 24.dp, vertical = 22.dp)) {
         Text(
             text = text,
-            color = Tokens.NoteInk,
-            style = PicoTheme.typography.bodyLargeMultiline,
-            fontSize = 20.sp,
-            lineHeight = 30.sp,
+            style = Tokens.noteTextStyle(PicoTheme.typography.bodyLargeMultiline),
             modifier = Modifier.verticalScroll(scroll),
         )
     }
@@ -130,6 +133,7 @@ fun StickyCard(
 @Composable
 fun StickyMarker(onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false) {
     val shape = RoundedCornerShape(20.dp)
+    val interaction = remember { MutableInteractionSource() }
     Box(modifier = modifier.size(96.dp)) {
         Box(
             modifier = Modifier
@@ -137,8 +141,7 @@ fun StickyMarker(onClick: () -> Unit, modifier: Modifier = Modifier, selected: B
                 .clip(shape)
                 .background(Tokens.NoteFill)
                 .border(if (selected) 2.dp else 1.dp, if (selected) Tokens.Accent else Tokens.White.copy(alpha = 0.9f), shape)
-                .spatialHoverEffect()
-                .clickable(onClick = onClick)
+                .clickable(interactionSource = interaction, indication = null, onClick = onClick)
                 .padding(start = 18.dp, top = 30.dp),
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

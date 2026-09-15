@@ -2,6 +2,9 @@ package com.example.spatialstickynotes.ui
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.TextStyle
 
 /** Colour tokens taken from the Figma "02 本地组件" page (PICO Spatial UI · PRD v0.2). */
 object Tokens {
@@ -22,5 +25,21 @@ object Tokens {
     val NoteCornerRadius = 20.dp
     val PanelCornerRadius = 24.dp
     val NoteCardWidth = 328.dp
-    val NoteCardHeight = 264.dp
+    /** Card height follows the text: 1 line = 30 dp line height + 2 × 22 dp padding; at most 7 lines, then it scrolls. */
+    val NoteCardMinHeight = 74.dp
+    val NoteCardMaxHeight = 254.dp
+    /** The inline editor keeps room for at least 4 lines. */
+    val NoteEditorMinHeight = 164.dp
+
+    /**
+     * Note body: 20 sp on an exact 30 dp line pitch. Compose (PICO fork) trims the first/last line's
+     * half-leading by default, which would make n lines measure 30n − 6 dp; Trim.None keeps every line
+     * at 30 dp so the 1-line / 7-line card heights above are exact.
+     */
+    fun noteTextStyle(base: TextStyle): TextStyle = base.copy(
+        color = NoteInk,
+        fontSize = 20.sp,
+        lineHeight = 30.sp,
+        lineHeightStyle = LineHeightStyle(alignment = LineHeightStyle.Alignment.Center, trim = LineHeightStyle.Trim.None),
+    )
 }

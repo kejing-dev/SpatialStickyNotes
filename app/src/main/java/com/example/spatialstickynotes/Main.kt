@@ -5,6 +5,10 @@ import androidx.compose.ui.unit.dp
 import com.example.spatialstickynotes.content.HomeWindow
 import com.example.spatialstickynotes.content.NoteWindow
 import com.example.spatialstickynotes.content.Windows
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import com.pico.spatial.ui.design.PicoTheme
 import com.pico.spatial.ui.foundation.dsl.DefaultWindowContainer
 import com.pico.spatial.ui.foundation.dsl.Form
@@ -30,8 +34,8 @@ fun mainApp(scope: SpatialAppScope) =
         }
 
         // One window per sticky note. No glass background so the yellow card reads as a real note;
-        // the caption bar stays visible so the user can always drag the note; WorldScale.Dynamic lets
-        // the distance estimator work (see lod/ViewerDistance.kt).
+        // the caption bar stays visible so the user can always drag the note. The window height follows
+        // the content (one-line card, folded marker, or up to the 400 dp maximum).
         WindowContainer(
             id = Windows.NOTE,
             form = Form.Planar,
@@ -42,10 +46,14 @@ fun mainApp(scope: SpatialAppScope) =
             defaultCaptionBarType = CaptionBarType.Default,
             worldScale = WorldScale.Dynamic,
         ) {
+            // The SDK resizes a ContentSize window whenever its windowConstraints change, so the note
+            // reports its content height and the constraints pin the window to exactly that height.
+            var noteHeight by remember { mutableStateOf(400.dp) }
             PicoTheme {
                 NoteWindow(
                     bundle = bundle,
-                    modifier = Modifier.windowConstraints(minWidth = 400.dp, minHeight = 400.dp, maxWidth = 400.dp, maxHeight = 400.dp),
+                    onContentHeight = { noteHeight = it.coerceIn(120.dp, 400.dp) },
+                    modifier = Modifier.windowConstraints(minWidth = 400.dp, minHeight = noteHeight, maxWidth = 400.dp, maxHeight = noteHeight),
                 )
             }
         }

@@ -5,11 +5,12 @@ import android.app.ActivityManager
 import android.os.Bundle
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,14 +24,16 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.spatialstickynotes.R
 import com.example.spatialstickynotes.data.Note
 import com.example.spatialstickynotes.data.NoteSession
 import com.example.spatialstickynotes.data.NoteStore
-import com.example.spatialstickynotes.lod.LodController
-import com.example.spatialstickynotes.lod.rememberViewerDistanceEstimate
 import com.example.spatialstickynotes.ui.ActionStrip
 import com.example.spatialstickynotes.ui.CounterRing
 import com.example.spatialstickynotes.ui.DeleteConfirmDialog
@@ -50,17 +53,19 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 
 /**
- * One sticky note in the Shared Space (v1.2, icon-only).
+ * One sticky note in the Shared Space (v1.3, icon-only).
  *
- * - Selection == the OS window focus: focused → the caption bar (drag = move) and the ✎ / 🗑 strip below the card.
+ * - Selection == the OS window focus: focused → the caption bar (drag = move) and the ✎ / 🗑 / ⤡ strip below the card.
  * - ✎, or a tap on the selected card, enters inline editing (single ✓ = done, autosave; no cancel).
- * - Far (LOD): the folded marker; one tap expands it; ⤡ collapses again.
+ * - ⤡ folds the note into the 96 dp marker (persisted); a tap on the marker unfolds it. No distance-based
+ *   switching any more: the viewer-distance estimate was unreliable on the headset.
+ * - The card is as tall as its text (1..7 lines, then scrolls); the window follows the content height.
  * - Delete asks once with an icon-only dialog that previews the note.
  * - A failed write is surfaced by the home window's title bar ("!" = retry); the note itself stays clean.
  */
 @OptIn(FlowPreview::class)
 @Composable
-fun NoteWindow(bundle: Bundle?, modifier: Modifier = Modifier) {
+fun NoteWindow(bundle: Bundle?, modifier: Modifier = Modifier, onContentHeight: (Dp) -> Unit = {}) {
     val noteId = bundle?.getString(Windows.KEY_NOTE_ID) ?: return
     val draftFlag = bundle.getBoolean(Windows.KEY_DRAFT, false)
     val notes by NoteStore.notes.collectAsState()
@@ -82,13 +87,8 @@ fun NoteWindow(bundle: Bundle?, modifier: Modifier = Modifier) {
     var wasPersisted by remember { mutableStateOf(note != null) }
     var deleted by remember { mutableStateOf(false) }
 
-    // ---- LOD (PRD 4.2) — frozen while the window is focused or being edited ------------------
-    val distance by rememberViewerDistanceEstimate()
-    val lod = remember { LodController() }
-    LaunchedEffect(distance, isFocused, editing) { if (!isFocused && !editing) lod.update(distance) }
-    var manuallyExpanded by remember { mutableStateOf(false) }
-    LaunchedEffect(lod.isNear) { if (lod.isNear) manuallyExpanded = false }
-    val showFull = editing || lod.isNear || manuallyExpanded
+    // ---- fold state (manual, persisted on the note) ------------------------------------------
+    val collapsed = !editing && (note?.collapsed ?: false)
     val selected = isFocused && !editing
 
     // ---- open / draft bookkeeping --------------------------------------------------------------
@@ -152,33 +152,52 @@ fun NoteWindow(bundle: Bundle?, modifier: Modifier = Modifier) {
         editing = true
     }
 
-    // Card on top, action strip BELOW the card (never covering the note text); the OS caption bar
-    // sits outside the window, so the bottom of the 400 dp window is free for the strip.
-    Column(modifier = modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(modifier = Modifier.fillMaxWidth().padding(top = 24.dp), contentAlignment = Alignment.TopCenter) {
-            when {
-                editing -> EditingCard(
-                    text = text,
-                    onTextChange = { text = Note.clamp(it) },
-                )
-                showFull -> StickyCard(text = note?.text ?: text, selected = selected, onClick = { tapCard() })
-                else -> Box(modifier = Modifier.width(Tokens.NoteCardWidth).height(Tokens.NoteCardHeight), contentAlignment = Alignment.BottomCenter) {
-                    StickyMarker(onClick = { manuallyExpanded = true }, selected = selected)
+    fun setCollapsed(value: Boolean) { if (note != null) NoteStore.scope.launch { NoteStore.setCollapsed(noteId, value) } }
+
+    // Card (or folded marker) on top, action strip slot BELOW it so it never covers the note text.
+    // The inner column is measured without the window's minimum, so its height is the true content
+    // height; the window is then pinned to it (see Main.kt). The strip slot is always reserved while
+    // unfolded so focusing a note does not make the window jump.
+    val density = LocalDensity.current
+    Column(
+        modifier = modifier.fillMaxWidth().wrapContentHeight(Alignment.Top).padding(horizontal = 20.dp, vertical = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Column(
+            // Measure the content with an unbounded height so it can report a height LARGER than the
+            // current window (the window's own max would otherwise clamp it and the window could only
+            // ever shrink). The placed height is clipped to the window until the window has grown.
+            modifier = Modifier.fillMaxWidth().layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                // The delete dialog is laid out inside this window and needs ~360 dp of height, so the
+                // window is opened up to its maximum while the dialog is showing.
+                onContentHeight(if (pendingDelete) 400.dp else with(density) { placeable.height.toDp() } + 24.dp)
+                layout(placeable.width, placeable.height.coerceAtMost(constraints.maxHeight)) { placeable.placeRelative(0, 0) }
+            },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(modifier = Modifier.fillMaxWidth().padding(top = 24.dp), contentAlignment = Alignment.TopCenter) {
+                when {
+                    editing -> EditingCard(
+                        text = text,
+                        onTextChange = { text = Note.clamp(it) },
+                    )
+                    collapsed -> StickyMarker(onClick = { setCollapsed(false) }, selected = selected)
+                    else -> StickyCard(text = note?.text ?: text, selected = selected, onClick = { tapCard() })
                 }
             }
-        }
-        Box(modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(60.dp), contentAlignment = Alignment.TopCenter) {
-            when {
-                editing -> ActionStrip {
-                    IconBtn(R.drawable.ic_check, "Done", onClick = { finishEditing() }, role = Role.Accent, enabled = text.isNotBlank())
-                }
-                selected && showFull -> ActionStrip {
-                    IconBtn(R.drawable.ic_edit, "Edit", onClick = { editing = true })
-                    StripDivider()
-                    IconBtn(R.drawable.ic_delete, "Delete", onClick = { pendingDelete = true }, role = Role.Danger)
-                    if (!lod.isNear && manuallyExpanded) {
+            if (!collapsed) {
+                Box(modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(60.dp), contentAlignment = Alignment.TopCenter) {
+                    if (editing) ActionStrip {
+                        IconBtn(R.drawable.ic_check, "Done", onClick = { finishEditing() }, role = Role.Accent, enabled = text.isNotBlank())
+                    } else if (selected) ActionStrip {
+                        IconBtn(R.drawable.ic_edit, "Edit", onClick = { editing = true })
                         StripDivider()
-                        IconBtn(R.drawable.ic_collapse, "Collapse", onClick = { manuallyExpanded = false })
+                        IconBtn(R.drawable.ic_delete, "Delete", onClick = { pendingDelete = true }, role = Role.Danger)
+                        if (note != null) {
+                            StripDivider()
+                            IconBtn(R.drawable.ic_collapse, "Collapse", onClick = { setCollapsed(true) })
+                        }
                     }
                 }
             }
@@ -206,12 +225,13 @@ fun NoteWindow(bundle: Bundle?, modifier: Modifier = Modifier) {
 private fun EditingCard(text: String, onTextChange: (String) -> Unit) {
     // No automatic focus request: the system keyboard button (PICO OS IME affordance) only appears
     // once the user taps into the text, not as soon as ✎ is pressed.
-    Box(modifier = Modifier.width(Tokens.NoteCardWidth).height(Tokens.NoteCardHeight)) {
+    // At least four lines of room; grows with the text up to the card maximum.
+    Box(modifier = Modifier.width(Tokens.NoteCardWidth).heightIn(min = Tokens.NoteEditorMinHeight, max = Tokens.NoteCardMaxHeight)) {
         TextArea(
             value = text,
             onValueChange = onTextChange,
-            modifier = Modifier.fillMaxSize(),
-            textStyle = PicoTheme.typography.bodyLargeMultiline.copy(color = Tokens.NoteInk, fontSize = 20.sp, lineHeight = 30.sp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = Tokens.NoteEditorMinHeight, max = Tokens.NoteCardMaxHeight),
+            textStyle = Tokens.noteTextStyle(PicoTheme.typography.bodyLargeMultiline),
             minLines = 4,
             cornerRadius = Tokens.NoteCornerRadius,
             colors = TextFieldDefaults.textFieldColors(

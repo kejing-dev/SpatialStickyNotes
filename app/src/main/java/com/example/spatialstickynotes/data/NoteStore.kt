@@ -89,6 +89,14 @@ object NoteStore {
         }
     }
 
+    /** Fold / unfold a note (does not touch updatedAt, so the list order is unchanged). */
+    suspend fun setCollapsed(id: String, collapsed: Boolean): Result<Unit> = mutex.withLock {
+        val current = _notes.value
+        val existing = current.firstOrNull { it.id == id } ?: return@withLock Result.success(Unit)
+        if (existing.collapsed == collapsed) return@withLock Result.success(Unit)
+        commitLocked(setOf(id), current.map { if (it.id == id) it.copy(collapsed = collapsed) else it })
+    }
+
     suspend fun delete(id: String): Result<Unit> = mutate(setOf(id)) { list -> list.filterNot { it.id == id } }
 
     /** Re-attempt writing the current in-memory state to disk. */
@@ -129,6 +137,7 @@ object NoteStore {
                 text = o.getString("text"),
                 createdAt = o.optLong("createdAt"),
                 updatedAt = o.optLong("updatedAt"),
+                collapsed = o.optBoolean("collapsed", false),
             )
         }
     }
@@ -136,7 +145,7 @@ object NoteStore {
     private fun writeToDisk(notes: List<Note>) {
         val array = JSONArray()
         notes.forEach { n ->
-            array.put(JSONObject().put("id", n.id).put("text", n.text).put("createdAt", n.createdAt).put("updatedAt", n.updatedAt))
+            array.put(JSONObject().put("id", n.id).put("text", n.text).put("createdAt", n.createdAt).put("updatedAt", n.updatedAt).put("collapsed", n.collapsed))
         }
         val tmp = File(file.parentFile, "$FILE_NAME.tmp")
         tmp.writeText(array.toString())

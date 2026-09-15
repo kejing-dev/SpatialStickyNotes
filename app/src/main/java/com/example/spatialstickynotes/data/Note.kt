@@ -1,11 +1,13 @@
 package com.example.spatialstickynotes.data
 
-/** A sticky note. Window position is owned by PICO OS (Shared Space), so only text is stored. */
+/** A sticky note. Window position is owned by PICO OS (Shared Space), so only text and the folded state are stored. */
 data class Note(
     val id: String,
     val text: String,
     val createdAt: Long,
     val updatedAt: Long,
+    /** Folded into the 96 dp marker (user's ⤡); persisted so it survives a restart. */
+    val collapsed: Boolean = false,
 ) {
     /** First non-empty line, clipped to [maxCodePoints] code points (used for list rows and window titles). */
     fun summary(maxCodePoints: Int = 36): String {
