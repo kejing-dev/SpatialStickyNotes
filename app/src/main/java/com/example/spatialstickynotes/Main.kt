@@ -1,8 +1,8 @@
 package com.example.spatialstickynotes
 
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.spatialstickynotes.content.HomeWindow
-import com.example.spatialstickynotes.content.NoteEditorWindow
 import com.example.spatialstickynotes.content.NoteWindow
 import com.example.spatialstickynotes.content.Windows
 import com.pico.spatial.ui.design.PicoTheme
@@ -17,39 +17,21 @@ import com.pico.spatial.ui.platform.resize.ContainerResizeRestriction
 import com.pico.spatial.ui.platform.resize.ContainerResizeType
 
 /**
- * Shared Space app: a default Planar window (home / list), an editor window and one Planar window
- * per sticky note. No Stage is opened, so the app never takes over the space and needs no MR
- * permissions (plane detection / anchors are intentionally not used).
+ * Shared Space app (v1.2, icon-only): a default Planar window (home / list) and one Planar window
+ * per sticky note. Creation and editing happen inline in the note window. No Stage is opened and no
+ * MR permissions are used.
  */
 fun mainApp(scope: SpatialAppScope) =
     with(scope) {
         DefaultWindowContainer {
             PicoTheme {
-                HomeWindow(modifier = androidx.compose.ui.Modifier.windowConstraints(minWidth = 900.dp, minHeight = 560.dp))
-            }
-        }
-
-        // Figma "新建便签 / 编辑便签" panel: 560 × 640 dp, opened in front of the viewer.
-        WindowContainer(
-            id = Windows.EDITOR,
-            form = Form.Planar,
-            defaultSize = WindowContainerSize(width = 560.dp, height = 640.dp),
-            resizeType = ContainerResizeType.ContentSize,
-            defaultResizeRestriction = ContainerResizeRestriction.UniformResizable,
-            enableMaterialBackground = true,
-        ) {
-            PicoTheme {
-                NoteEditorWindow(
-                    bundle = bundle,
-                    modifier = androidx.compose.ui.Modifier.windowConstraints(
-                        minWidth = 560.dp, minHeight = 640.dp, maxWidth = 560.dp, maxHeight = 640.dp,
-                    ),
-                )
+                HomeWindow(modifier = Modifier.windowConstraints(minWidth = 900.dp, minHeight = 560.dp))
             }
         }
 
         // One window per sticky note. No glass background so the yellow card reads as a real note;
-        // WorldScale.Dynamic lets the distance estimator work (see lod/ViewerDistance.kt).
+        // the caption bar stays visible so the user can always drag the note; WorldScale.Dynamic lets
+        // the distance estimator work (see lod/ViewerDistance.kt).
         WindowContainer(
             id = Windows.NOTE,
             form = Form.Planar,
@@ -57,15 +39,13 @@ fun mainApp(scope: SpatialAppScope) =
             resizeType = ContainerResizeType.ContentSize,
             defaultResizeRestriction = ContainerResizeRestriction.UniformResizable,
             enableMaterialBackground = false,
-            defaultCaptionBarType = CaptionBarType.AutomaticHide,
+            defaultCaptionBarType = CaptionBarType.Default,
             worldScale = WorldScale.Dynamic,
         ) {
             PicoTheme {
                 NoteWindow(
                     bundle = bundle,
-                    modifier = androidx.compose.ui.Modifier.windowConstraints(
-                        minWidth = 400.dp, minHeight = 400.dp, maxWidth = 400.dp, maxHeight = 400.dp,
-                    ),
+                    modifier = Modifier.windowConstraints(minWidth = 400.dp, minHeight = 400.dp, maxWidth = 400.dp, maxHeight = 400.dp),
                 )
             }
         }

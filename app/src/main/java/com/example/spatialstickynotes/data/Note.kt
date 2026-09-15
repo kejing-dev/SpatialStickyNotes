@@ -1,23 +1,13 @@
 package com.example.spatialstickynotes.data
 
-/** Placement state of a note in space (Shared Space: window position is managed by PICO OS). */
-enum class PlacementState {
-    /** Text submitted, window opened, waiting for the user to drag it to a surface and confirm. */
-    PENDING,
-    /** User confirmed the position ("固定在这里"). */
-    PLACED,
-    /** Was placed in a previous session; position could not be restored, needs re-placement. */
-    NEEDS_REPLACE,
-}
-
+/** A sticky note. Window position is owned by PICO OS (Shared Space), so only text is stored. */
 data class Note(
     val id: String,
     val text: String,
     val createdAt: Long,
     val updatedAt: Long,
-    val placement: PlacementState,
 ) {
-    /** One-line summary for lists (first line, at most [maxCodePoints] code points). */
+    /** First non-empty line, clipped to [maxCodePoints] code points (used for list rows and window titles). */
     fun summary(maxCodePoints: Int = 36): String {
         val firstLine = text.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: ""
         return if (firstLine.codePointCount(0, firstLine.length) <= maxCodePoints) firstLine
@@ -30,7 +20,7 @@ data class Note(
 
         fun countCodePoints(text: String): Int = text.codePointCount(0, text.length)
 
-        /** Clamp [text] to [MAX_CODE_POINTS] code points (Chinese characters and emoji count as one). */
+        /** Clamp to [MAX_CODE_POINTS] code points (a CJK character or a single-code-point emoji counts as one). */
         fun clamp(text: String): String {
             val count = countCodePoints(text)
             return if (count <= MAX_CODE_POINTS) text

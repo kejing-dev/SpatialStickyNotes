@@ -17,14 +17,12 @@ import kotlinx.coroutines.isActive
 /**
  * Viewer-to-window distance estimate for Shared Space.
  *
- * HMD tracking is only available in Full Space, so in Shared Space the app cannot read the head
- * pose directly. PICO OS keeps a WorldScale.Dynamic window at a constant *apparent* size by scaling
- * its physical size with the viewing distance; the PhysicalLengthConverter therefore reports a
- * changing dp→metre factor. A new WindowContainer opens ~1.75 m in front of the user, so the first
- * sample is taken as the 1.75 m baseline and later samples are scaled proportionally.
- *
- * Returns null until a baseline is available. If the platform does not vary the factor, the
- * estimate stays at the baseline (treated as "near" by [LodController]).
+ * HMD tracking is only available in Full Space, so the app cannot read the head pose directly.
+ * PICO OS keeps a WorldScale.Dynamic window at a constant *apparent* size by scaling its physical
+ * size with the viewing distance; the PhysicalLengthConverter therefore reports a changing
+ * dp→metre factor. A new WindowContainer opens ~1.75 m in front of the user, so the first sample is
+ * taken as the 1.75 m baseline and later samples are scaled proportionally. Returns null until a
+ * baseline exists; if the platform never varies the factor the estimate stays at 1.75 m.
  */
 private const val DEFAULT_OPEN_DISTANCE_M = 1.75f
 private const val SAMPLE_INTERVAL_MS = 200L
@@ -40,11 +38,7 @@ fun rememberViewerDistanceEstimate(): State<Float?> {
         while (isActive) {
             val sample = runCatching { converter.dpToLength(100.dp, LengthUnit.Meters) }
             val metresPer100dp = sample.getOrDefault(0f)
-            if (sample.isFailure) {
-                Log.w(TAG, "dpToLength failed: ${sample.exceptionOrNull()}")
-            } else if (metresPer100dp <= 0f) {
-                Log.w(TAG, "dpToLength returned $metresPer100dp (density=${converter.density}); no estimate")
-            }
+            if (sample.isFailure) Log.w(TAG, "dpToLength failed: ${sample.exceptionOrNull()}")
             if (metresPer100dp > 0f) {
                 if (baseline == null) baseline = metresPer100dp
                 val b = baseline!!
@@ -62,8 +56,9 @@ fun rememberViewerDistanceEstimate(): State<Float?> {
 }
 
 /**
- * Two-level LOD with hysteresis (PRD 4.2): enter "near" at <= 1.5 m, leave it at >= 1.8 m, keep the
- * current level in between to avoid flicker at the boundary.
+ * Two-level LOD with hysteresis (PRD 4.2): enter "near" at <= 1.5 m, leave it at >= 1.8 m.
+ * A note starts NEAR unless the first sample is already at or beyond the exit threshold, so the
+ * ~1.75 m default open distance does not fold a freshly created note.
  */
 class LodController(
     private val nearEnterM: Float = 1.5f,
@@ -76,7 +71,7 @@ class LodController(
     fun update(distanceM: Float?) {
         if (distanceM == null) return
         if (!initialized) {
-            isNear = distanceM <= nearEnterM
+            isNear = distanceM < nearExitM
             initialized = true
             return
         }

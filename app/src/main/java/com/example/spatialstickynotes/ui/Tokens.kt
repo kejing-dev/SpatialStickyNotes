@@ -22,5 +22,5 @@ object Tokens {
     val NoteCornerRadius = 20.dp
     val PanelCornerRadius = 24.dp
     val NoteCardWidth = 328.dp
-    val NoteCardMinHeight = 224.dp
+    val NoteCardHeight = 264.dp
 }

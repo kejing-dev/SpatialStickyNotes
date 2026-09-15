@@ -1,6 +1,8 @@
 package com.example.spatialstickynotes.content
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -25,98 +28,88 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.example.spatialstickynotes.R
 import com.example.spatialstickynotes.data.Note
 import com.example.spatialstickynotes.data.NoteSession
 import com.example.spatialstickynotes.data.NoteStore
-import com.example.spatialstickynotes.data.PlacementState
-import com.example.spatialstickynotes.ui.DangerButton
-import com.example.spatialstickynotes.ui.MutedText
-import com.example.spatialstickynotes.ui.Panel
-import com.example.spatialstickynotes.ui.PrimaryButton
-import com.example.spatialstickynotes.ui.SecondaryButton
-import com.example.spatialstickynotes.ui.StatusPill
+import com.example.spatialstickynotes.ui.DeleteConfirmDialog
+import com.example.spatialstickynotes.ui.IconBtn
+import com.example.spatialstickynotes.ui.Role
 import com.example.spatialstickynotes.ui.Tokens
-import com.pico.spatial.ui.design.ButtonDefaults
-import com.pico.spatial.ui.design.ListItem
+import com.pico.spatial.ui.design.Icon
 import com.pico.spatial.ui.design.PicoTheme
 import com.pico.spatial.ui.design.Text
 import com.pico.spatial.ui.design.TitleBar
-import com.pico.spatial.ui.design.windows.AlertDialog
-import com.pico.spatial.ui.design.windows.LocalSnackbarHostState
 import com.pico.spatial.ui.platform.containers.LocalSpatialNavigator
+import java.util.UUID
 import kotlinx.coroutines.launch
 
 /**
- * Default (main) WindowContainer: entry point, note list (PRD F09) and capacity guard (F10).
- * Creation and editing happen in [NoteEditorWindow]; each placed note lives in its own
- * [NoteWindow] so PICO OS lets the user drag it anywhere in the Shared Space.
+ * Main WindowContainer (v1.2, icon-only): app glyph, 「+」 with a capacity ring, a danger 「!」 while a
+ * write failed, and the note list (tap a row = open/bring the note window forward, 🗑 = delete).
  */
 @Composable
 fun HomeWindow(modifier: Modifier = Modifier) {
     val notes by NoteStore.notes.collectAsState()
     val openIds by NoteSession.openIds.collectAsState()
+    val draftIds by NoteSession.draftIds.collectAsState()
+    val unsavedIds by NoteStore.unsavedIds.collectAsState()
     val dirty by NoteStore.dirty.collectAsState()
     val navigator = LocalSpatialNavigator.current
-    val snack = LocalSnackbarHostState.current
     val scope = rememberCoroutineScope()
     var pendingDelete by remember { mutableStateOf<Note?>(null) }
 
-    fun openEditorForCreate() {
-        if (notes.size >= Note.MAX_NOTES) {
-            scope.launch { snack.show(message = "已达到 ${Note.MAX_NOTES} 条上限，请先删除旧便签") }
-            return
-        }
-        navigator.openWindowContainer(Windows.EDITOR, Windows.editorTag(null), Windows.editorBundle(Windows.MODE_CREATE))
+    val count = notes.size + draftIds.size
+    val full = count >= Note.MAX_NOTES
+
+    fun createNote() {
+        // One draft at a time: 「+」 again just brings the open draft forward.
+        draftIds.firstOrNull()?.let { navigator.openWindowContainer(Windows.NOTE, it, Windows.noteBundle(it, draft = true)); return }
+        if (full) return
+        val id = UUID.randomUUID().toString()
+        NoteSession.markDraft(id)
+        navigator.openWindowContainer(Windows.NOTE, id, Windows.noteBundle(id, draft = true))
     }
 
     Column(modifier = modifier.fillMaxSize()) {
         TitleBar(
             title = {
-                Text(
-                    text = "空间便利贴",
-                    color = Tokens.Ink,
-                    style = PicoTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                Box(modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(Tokens.NoteFill), contentAlignment = Alignment.Center) {
+                    Icon(painter = painterResource(R.drawable.ic_note), contentDescription = "Spatial Sticky Notes", tint = Tokens.Ink, modifier = Modifier.size(26.dp))
+                }
             },
             trailingActions = {
                 if (dirty) {
-                    SecondaryButton(
-                        text = "重试保存",
-                        size = ButtonDefaults.Small,
-                        onClick = {
-                            scope.launch {
-                                val r = NoteStore.retrySave()
-                                snack.show(message = if (r.isSuccess) "已保存到本机" else "保存失败，请重试")
-                            }
-                        },
-                    )
-                    Spacer(Modifier.width(8.dp))
+                    IconBtn(R.drawable.ic_error, "Save failed, tap to retry", onClick = { NoteStore.retrySaveAsync() }, role = Role.Danger, width = 48.dp, height = 48.dp, round = true)
+                    Spacer(Modifier.width(12.dp))
                 }
-                PrimaryButton(text = "新建便签", size = ButtonDefaults.Small, onClick = { openEditorForCreate() })
+                PlusWithCapacityRing(count = count, max = Note.MAX_NOTES, onClick = { createNote() })
             },
         )
-
         if (notes.isEmpty()) {
-            FirstUsePanel(onCreate = { openEditorForCreate() })
+            EmptyState(onCreate = { createNote() })
         } else {
-            NoteList(
-                notes = notes,
-                openIds = openIds,
-                onOpen = { note ->
-                    navigator.openWindowContainer(Windows.NOTE, note.id, Windows.noteBundle(note.id))
-                },
-                onEdit = { note ->
-                    navigator.openWindowContainer(
-                        Windows.EDITOR, Windows.editorTag(note.id), Windows.editorBundle(Windows.MODE_EDIT, note.id)
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(notes, key = { it.id }) { note ->
+                    NoteRow(
+                        note = note,
+                        shown = note.id in openIds,
+                        unsaved = note.id in unsavedIds,
+                        onOpen = { navigator.openWindowContainer(Windows.NOTE, note.id, Windows.noteBundle(note.id)) },
+                        onDelete = { pendingDelete = note },
                     )
-                },
-                onDelete = { pendingDelete = it },
-            )
+                }
+            }
         }
     }
 
@@ -127,136 +120,74 @@ fun HomeWindow(modifier: Modifier = Modifier) {
             onConfirm = {
                 pendingDelete = null
                 scope.launch {
-                    val r = NoteStore.delete(note.id)
-                    if (r.isSuccess) {
-                        navigator.closeWindowContainer(Windows.NOTE, note.id)
-                        navigator.closeWindowContainer(Windows.EDITOR, Windows.editorTag(note.id))
-                        snack.show(message = "便签已删除")
-                    } else {
-                        snack.show(message = "删除后保存失败，请点「重试保存」")
-                    }
+                    NoteStore.delete(note.id)
+                    navigator.closeWindowContainer(Windows.NOTE, note.id)
                 }
             },
         )
     }
 }
 
-/** Figma 01 创建 · 01 首次使用. */
+/** 「+」 wrapped by a thin ring showing notes / 30; the ring turns danger and the button greys out when full. */
 @Composable
-private fun FirstUsePanel(onCreate: () -> Unit) {
+private fun PlusWithCapacityRing(count: Int, max: Int, onClick: () -> Unit) {
+    val full = count >= max
+    Box(modifier = Modifier.size(64.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.size(64.dp)) {
+            val stroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round)
+            val inset = stroke.width / 2
+            val sz = Size(size.width - stroke.width, size.height - stroke.width)
+            drawArc(Tokens.Border, 0f, 360f, false, Offset(inset, inset), sz, style = stroke)
+            if (count > 0) drawArc(if (full) Tokens.DangerText else Tokens.Accent, -90f, 360f * (count.toFloat() / max).coerceIn(0f, 1f), false, Offset(inset, inset), sz, style = stroke)
+        }
+        IconBtn(R.drawable.ic_plus, "New note", onClick = onClick, role = if (full) Role.Secondary else Role.Accent, width = 52.dp, height = 52.dp, iconSize = 32.dp, round = true, enabled = !full)
+    }
+}
+
+@Composable
+private fun EmptyState(onCreate: () -> Unit) {
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Panel(modifier = Modifier.width(420.dp)) {
-            Column {
-                Text(
-                    text = "空间便利贴",
-                    color = Tokens.Ink,
-                    style = PicoTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = "把想法留在空间里\n写下来，放在想放的位置。",
-                    color = Tokens.Ink,
-                    style = PicoTheme.typography.bodyLargeMultiline,
-                    lineHeight = 28.sp,
-                )
-                Spacer(Modifier.height(20.dp))
-                PrimaryButton(text = "新建便签", onClick = onCreate)
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            Box(modifier = Modifier.width(160.dp).height(120.dp).clip(RoundedCornerShape(20.dp)).background(Tokens.NoteFill).padding(start = 28.dp, top = 36.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    listOf(64, 48, 32).forEach { w -> Box(Modifier.width(w.dp).height(6.dp).clip(CircleShape).background(Tokens.NoteInk.copy(alpha = 0.35f))) }
+                }
             }
+            IconBtn(R.drawable.ic_plus, "New note", onClick = onCreate, role = Role.Accent, width = 96.dp, height = 64.dp, iconSize = 36.dp)
         }
     }
 }
 
 @Composable
-private fun NoteList(
-    notes: List<Note>,
-    openIds: Set<String>,
-    onOpen: (Note) -> Unit,
-    onEdit: (Note) -> Unit,
-    onDelete: (Note) -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            MutedText("共 ${notes.size} / ${Note.MAX_NOTES} 条 · 找不到的便签可在这里放回空间")
-            val pending = notes.count { it.placement != PlacementState.PLACED }
-            if (pending > 0) StatusPill(text = "$pending 条待放置")
-        }
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(notes, key = { it.id }) { note ->
-                val isOpen = note.id in openIds
-                ListItem(
-                    modifier = Modifier.clip(RoundedCornerShape(16.dp)).background(Tokens.Canvas),
-                    headlineContent = {
-                        Text(
-                            text = note.summary(),
-                            color = Tokens.Ink,
-                            style = PicoTheme.typography.bodyLarge,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    supportingContent = {
-                        MutedText(statusLine(note, isOpen))
-                    },
-                    leadingContent = {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Tokens.NoteFill)
-                        )
-                    },
-                    trailingContent = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            SecondaryButton(
-                                text = if (isOpen) "查看" else if (note.placement == PlacementState.NEEDS_REPLACE) "放回空间" else "放置",
-                                size = ButtonDefaults.Small,
-                                onClick = { onOpen(note) },
-                            )
-                            SecondaryButton(text = "编辑", size = ButtonDefaults.Small, onClick = { onEdit(note) })
-                            DangerButton(text = "删除", size = ButtonDefaults.Small, onClick = { onDelete(note) })
-                        }
-                    },
-                )
+private fun NoteRow(note: Note, shown: Boolean, unsaved: Boolean, onOpen: () -> Unit, onDelete: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(Tokens.Canvas)
+            .clickable(onClick = onOpen)
+            .padding(start = 20.dp, end = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Box(modifier = Modifier.size(40.dp)) {
+            Box(modifier = Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(Tokens.NoteFill).padding(start = 9.dp, top = 12.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    listOf(18, 13, 9).forEach { w -> Box(Modifier.width(w.dp).height(2.5.dp).clip(CircleShape).background(Tokens.NoteInk.copy(alpha = 0.7f))) }
+                }
             }
+            if (shown) Box(Modifier.align(Alignment.TopEnd).size(12.dp).clip(CircleShape).background(Tokens.Canvas).padding(2.dp).clip(CircleShape).background(Tokens.Accent))
+            if (unsaved) Box(Modifier.align(Alignment.BottomEnd).size(12.dp).clip(CircleShape).background(Tokens.Canvas).padding(2.dp).clip(CircleShape).background(Tokens.DangerText))
         }
+        Text(
+            text = note.summary(60),
+            color = Tokens.Ink,
+            style = PicoTheme.typography.bodyLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        IconBtn(R.drawable.ic_delete, "Delete", onClick = onDelete, role = Role.Danger, width = 46.dp, height = 40.dp, iconSize = 24.dp)
     }
-}
-
-private fun statusLine(note: Note, isOpen: Boolean): String = when {
-    note.placement == PlacementState.PLACED && isOpen -> "已固定在空间 · 已保存"
-    note.placement == PlacementState.PLACED -> "已保存 · 当前未显示"
-    note.placement == PlacementState.PENDING && isOpen -> "待放置 · 拖到目标位置后固定"
-    note.placement == PlacementState.PENDING -> "待放置"
-    note.placement == PlacementState.NEEDS_REPLACE -> "上次位置未恢复 · 待重新放置"
-    else -> ""
-}
-
-/** PRD F06: explicit delete with one confirmation. */
-@Composable
-fun DeleteConfirmDialog(note: Note, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(text = "删除这条便签？", color = Tokens.Ink, style = PicoTheme.typography.titleMedium) },
-        content = {
-            Text(
-                text = "“${note.summary(24)}”将从空间和本机中移除，重启后不再出现。",
-                color = Tokens.Muted,
-                style = PicoTheme.typography.bodyMediumMultiline,
-            )
-        },
-        buttons = {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SecondaryButton(text = "取消", onClick = onDismiss)
-                DangerButton(text = "删除", onClick = onConfirm)
-            }
-        },
-    )
 }
